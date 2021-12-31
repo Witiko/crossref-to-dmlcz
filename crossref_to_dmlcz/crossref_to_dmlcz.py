@@ -1,11 +1,13 @@
-from typing import Iterable
+from typing import Iterable, Dict
 from itertools import chain
+import json
 from pathlib import Path
 
 import click
 from lxml import etree
 from PyPDF2 import PdfFileReader, PdfFileWriter
 import pycountry
+import requests
 
 
 NAMESPACES = {
@@ -176,16 +178,49 @@ class JournalArticle:
             dois = xpath(reference, 'crossref:doi')
             article_titles = xpath(reference, 'crossref:article_title')
             unstructured_citations = xpath(reference, 'crossref:unstructured_citation')
+            optionals = dict()
             if dois:
                 doi, = dois
                 doi = get_text(doi)
                 title = None
                 author = None
+                optionals['URL'] = 'https://dx.doi.org/{}'.format(doi)
                 suffix = '. DOI: {}'.format(doi)
+
+                resolved_doi = resolve_doi(doi)
+
+                if 'title' in resolved_doi:
+                    title = resolved_doi['title']
+
+                if 'author' in resolved_doi and resolved_doi['author']:
+                    first_name = resolved_doi['author'][0]['given']
+                    last_name = resolved_doi['author'][0]['family']
+                    author = '{}, {}'.format(last_name, first_name)
+
+                def find_optional_in_json(input_address: Iterable[str], output_element_name: str) -> None:
+                    element = resolved_doi
+                    for fragment in input_address:
+                        if not isinstance(element, (dict, list)):
+                            break
+                        if isinstance(element, dict) and fragment not in element:
+                            break
+                        if isinstance(element, list) and fragment >= len(element):
+                            break
+                        element = element[fragment]
+                    assert not isinstance(element, (dict, list))
+                    optionals[output_element_name] = str(element)
+
+                find_optional_in_json(['publisher'], 'publisher')
+                find_optional_in_json(['published-print', 'date-parts', 0, 0], 'year')
+                find_optional_in_json(['issue'], 'number')
+                find_optional_in_json(['volume'], 'volume')
+                find_optional_in_json(['page'], 'pages')
+                find_optional_in_json(['ISSN', 0], 'ISSN')
+
             elif article_titles:
                 title, = article_titles
                 title = get_text(title)
-                author,  = xpath(reference, 'crossref:author')
+                author, = xpath(reference, 'crossref:author')
                 author = get_text(author)
                 suffix = ''
             elif unstructured_citations:
@@ -213,6 +248,16 @@ def get_text(element: etree._Element) -> str:
     texts = filter(lambda x: x, texts)
     texts = ' '.join(texts).split()
     return ' '.join(texts)
+
+
+def resolve_doi(doi: str) -> Dict:
+    url = 'https://dx.doi.org/{}'.format(doi)
+    headers = {'Accept': 'application/vnd.citationstyles.csl+json'}
+    result = requests.get(url, headers=headers)
+    if result.status_code == 200:
+        return json.loads(result.text)
+    else:
+        return dict()
 
 
 def normalize_language(language_code: str) -> str:
