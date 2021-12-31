@@ -194,7 +194,7 @@ class JournalArticle:
                 author = None
                 suffix = get_text(unstructured_citation)
             else:
-                message = 'Reference {} contains neither DOI, article title, or unstructured citation'
+                message = 'Reference {} contains neither DOI, article title, nor unstructured citation'
                 raise ValueError(message.format(refid))
             reference = (refid, prefix, title, author, suffix)
             self.references.append(reference)
